@@ -40,7 +40,7 @@ class Application(ABC):
             self.renderer.clear()
             self.layer_stack.update(dt)
             self.layer_stack.render(self.renderer)
-            self.renderer.flip()
+            self.renderer.show()
 
             self.event_buffer.clear()
             for event in pygame.event.get():
@@ -55,6 +55,7 @@ class Application(ABC):
     def on_event(self, event: Event):
         if event.type == "WINDOW_CLOSE":
             self.on_close()
+            return
 
         self.event_buffer.add_event(event)
 

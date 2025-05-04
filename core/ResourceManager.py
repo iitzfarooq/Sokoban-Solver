@@ -27,3 +27,9 @@ class ResourceManager:
     def unload(self, category, name):
         if self.has(category, name):
             del self.assets[category][name]
+            
+    def clear(self):
+        for category in self.assets:
+            # make list to avoid modifying dict during iteration
+            for name in list(self.assets[category].keys()): 
+                self.unload(category, name)

@@ -12,9 +12,6 @@ class Renderer:
     def clear(self):
         self.screen.fill(BLACK)
 
-    def flip(self):
-        pygame.display.flip()
-
     def create_surface(self, width, height):
         return pygame.Surface((width, height), pygame.SRCALPHA, 32)
 
