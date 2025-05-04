@@ -1,4 +1,5 @@
 import core
+import os
 import pygame
 from typing import List, Tuple, Set
 
@@ -15,6 +16,8 @@ MASKS = {
     "boulder": 0x01,
     "wall": 0x02,
 }
+
+WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def generate_indices(shape):
@@ -181,6 +184,69 @@ def make_state(description):
 
     return SokobanState(logical_board, player, targets)
 
+class SokobanView:
+    def __init__(self, cell_len, resource_manager: core.ResourceManager):
+        self._cell_len = cell_len
+        self.resource_manager = resource_manager
+
+        assets_dir = os.path.join(WORKING_DIR, "assets")
+        assets_path = {
+            "grass": os.path.join(assets_dir, "grass.png"),
+            "player": os.path.join(assets_dir, "player.png"),
+            "boulder": os.path.join(assets_dir, "boulder.png"),
+            "target": os.path.join(assets_dir, "target.png"),
+            "wall": os.path.join(assets_dir, "wall.png"),
+        }
+        
+        self.original_images = {
+            name: self.resource_manager.load_image(name, path, convert_alpha=True)
+            for name, path in assets_path.items()
+        }
+        
+        self.assets = {
+            name: pygame.transform.smoothscale(img, (self.cell_len, self.cell_len))
+            for name, img in self.original_images.items()
+        }
+        
+    @property
+    def cell_len(self):
+        return self._cell_len
+    
+    @cell_len.setter
+    def cell_len(self, value):
+        assert value > 0, "Cell length must be positive."
+        
+        self._cell_len = value
+        self.assets = {
+            name: pygame.transform.smoothscale(img, (self.cell_len, self.cell_len))
+            for name, img in self.original_images.items()
+        }
+    
+        
+    def render_view(self, state: SokobanState):
+        # m = rows, n = cols
+        board_width = state.n * self.cell_len
+        board_height = state.m * self.cell_len
+        
+        board_surface = pygame.Surface((board_width, board_height), pygame.SRCALPHA, 32)
+        board_surface.fill((0, 0, 0, 0))
+        
+        for i, j in generate_indices((state.m, state.n)):
+            cell = state.logical_board[i][j]
+            x, y = j * self.cell_len, i * self.cell_len
+            
+            board_surface.blit(self.assets["grass"], (x, y))
+            if cell & MASKS["target"]:
+                board_surface.blit(self.assets["target"], (x, y))
+            if cell & MASKS["player"]:
+                board_surface.blit(self.assets["player"], (x, y))
+            if cell & MASKS["boulder"]:
+                board_surface.blit(self.assets["boulder"], (x, y))
+            if cell & MASKS["wall"]:
+                board_surface.blit(self.assets["wall"], (x, y))
+                
+        return board_surface
+
 
 class Tape:
     pass
@@ -189,6 +255,60 @@ class Tape:
 class SokobanSolver:
     pass
 
+description = [
+        [["wall"], ["wall"], ["wall"], ["wall"], [], [], []],
+        [["wall"], [], [], ["wall"], ["wall"], ["wall"], ["wall"]],
+        [["wall"], [], ["target"], [], ["target"], [], ["wall"]],
+        [["wall"], [], ["boulder"], ["boulder"], ["wall"], ["player"], ["wall"]],
+        [["wall"], ["wall"], [], [], [], [], ["wall"]],
+        [[], ["wall"], ["wall"], ["wall"], ["wall"], ["wall"], ["wall"]]
+]
 
-class Sokoban(core.Layer):
-    pass
+
+class SokobanLayer(core.Layer):
+    def __init__(self):
+        super().__init__("SokobanLayer")
+        self.state = None
+        self.view = None
+        
+        self.resource_manager = core.ResourceManager()
+        
+        # self.solver = None
+        # self.tape = None
+    
+    def on_attach(self):
+        self.state = make_state(description)
+        self.view = SokobanView(50, self.resource_manager)
+        # self.solver = SokobanSolver()
+        # self.tape = Tape()
+        
+    def on_detach(self): 
+        self.resource_manager.clear()
+        
+    def on_update(self, dt):
+        pass
+    
+    def on_event(self, event):
+        pass
+    
+    def on_render(self, renderer):
+        board_surface = self.view.render_view(self.state)
+        renderer.submit_surface(board_surface, 0, 0)
+
+
+class Sokoban(core.Application):
+    def __init__(self):
+        config = {
+            "working_directory": WORKING_DIR,
+            "size": (800, 600),
+            "title": "Sokoban",
+            "fps": 60,
+        }
+        super().__init__(config)
+        
+    def on_start(self):
+        sokoban_layer = SokobanLayer()
+        self.layer_stack.push_layer(sokoban_layer)
+        
+app = Sokoban()
+core.main(app)
