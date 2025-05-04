@@ -67,8 +67,9 @@ class EventDispatcher:
 
     def dispatch(self, event_type, func: Callable[[Event], bool]):
         if self.event.type == event_type and self.event.handled is False:
-            self.event.handled |= func(self.event)
-            return True
+            status = func(self.event)
+            self.event.handled |= status
+            return status
 
         return False
 
@@ -89,3 +90,4 @@ class EventBuffer:
     def propogate_events(self, layer_stack: LayerStack):
         for event in self.events:
             layer_stack.handle_event(event)
+        self.clear()

@@ -55,8 +55,7 @@ class Application(ABC):
             self.layer_stack.update(dt)
             self.layer_stack.render(self.renderer)
             self.renderer.show()
-
-            self.event_buffer.clear()
+            
             for event in pygame.event.get():
                 mapped_event = self.map_events(event)
                 if mapped_event:

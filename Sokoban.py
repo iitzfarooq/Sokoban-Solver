@@ -3,6 +3,7 @@ import os
 import pygame
 from typing import List, Tuple, Set
 from Grid import description
+import core.EventManager
 
 WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 app_config = {
@@ -79,7 +80,14 @@ class SokobanState:
         )
 
     def __str__(self):
-        return f"SokobanState(player={self.player}, targets={self.targets})"
+        boulders = [(i, j) for i, j in generate_indices((self.m, self.n)) if self.has_boulder((i, j))]
+        
+        boulder_str = ";".join(f"{x},{y}" for x, y in boulders[:3])
+        if len(boulders) > 3:
+            boulder_str += ";..."
+            
+        return f"P{self.player[0]},{self.player[1]} B{len(boulders)}[{boulder_str}]"
+        
 
     def clone(self):
         """
@@ -279,16 +287,207 @@ def rescale_surface_to_fit(surface: pygame.Surface, shape):
     return pygame.transform.smoothscale(surface, (new_width, new_height))
 
 class Tape:
-    pass
+    TILE_LEN     = 100
+    CELL_COLOR   = (160, 198, 107)
+    BORDER_COLOR = (0, 0, 0)
+    HEAD_COLOR   = (247, 201, 72)
+    
+    def __init__(self, name, max_display=5):
+        assert max_display > 0, "max_display must be positive."
+        
+        self.name = name
+        self.tape = []
+        self.head = 0
+        self.max_display = max_display
+        self.font = pygame.font.SysFont('Aptos', 12)
 
+    def __iter__(self):
+        yield from self.tape
+        
+    def __getitem__(self, index):
+        return self.tape[index]
+    
+    def __len__(self):
+        return len(self.tape)
+    
+    def __bool__(self):
+        return bool(self.tape)
+
+    def add(self, item):
+        self.tape.append(item)
+        
+    def remove(self, index):
+        self.tape.pop(index)
+        
+    def get_head(self):
+        return self.tape[self.head]
+    
+    def set_head(self, index: int):
+        if not self.tape:
+            self.head = 0  # Or maybe -1 if you want to indicate 'invalid'
+        else:
+            self.head = index % len(self.tape)
+        
+    def clear(self):
+        self.tape.clear()
+        
+    def _get_interval(self):
+        if self.head is None:
+            total = len(self.tape)
+            if total == 0:
+                return 0, 0
+
+            end = total - 1
+            start = max(0, end - self.max_display + 1)
+            return start, end
+        else:
+            half = self.max_display // 2
+            start = max(0, self.head - half)
+            end = min(len(self.tape) - 1, start + self.max_display - 1)
+            return start, end
+        
+    def to_surface(self):
+        w = self.TILE_LEN * self.max_display
+        h = self.TILE_LEN
+        # add some space for the title too 
+        
+        h += 20
+        surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        surf.fill((0,0,0,0))   # fully transparent background
+        
+        # start with the title
+        title_surface = self.font.render(self.name, True, (0, 0, 0))
+        title_rect = title_surface.get_rect(center=(w // 2, 10))
+        surf.blit(title_surface, title_rect)
+        
+        start, end = self._get_interval()
+        
+        for i in range(self.max_display):
+            tape_idx = start + i
+            x = i * self.TILE_LEN
+            
+            cell = pygame.Rect(x, 20, self.TILE_LEN, self.TILE_LEN)
+            
+            # draw the background
+            pygame.draw.rect(surf, self.CELL_COLOR, cell, 0)
+            
+            # if the index is head, draw the head color
+            if tape_idx == self.head:
+                pygame.draw.rect(surf, self.HEAD_COLOR, cell, 0)
+            
+            # draw the border
+            pygame.draw.rect(surf, self.BORDER_COLOR, cell, 1)
+        
+            # draw the text
+            if tape_idx < len(self.tape):
+                text_surface = self.font.render(str(self.tape[tape_idx]), True, (0, 0, 0))
+                text_rect = text_surface.get_rect(center=(x + self.TILE_LEN // 2, 20 + self.TILE_LEN // 2))
+                surf.blit(text_surface, text_rect)
+                
+        return surf
+    
 
 class SokobanSolver:
-    pass
+    STEP_TIME = 0.16
+    
+    def __init__(self, state: SokobanState):
+        self.initial_state = state
+        self.neighbors = Tape("Neighbors")
+        self.queue = Tape("SolverQueue")
+        self.visited_tape = Tape("VisitedTape")
+        self.visited = set() 
+        self.parent_pointers = {}
+        
+        self.queue.add(self.initial_state)
+        self.visited.add(self.initial_state)
+        self.visited_tape.add(self.initial_state)
+        self.parent_pointers[self.initial_state] = None
+        
+        self.visited_tape.head = None
+        self.neighbors.head = None
+        
+        self.current_state = self.initial_state
+        self.step_time = 0.0
+        self.mode = 'solving'
+        
+        self.steps = [
+            self.process_queue_front, 
+            self.process_neighbors
+        ]
+        self.current_step = 0
+    
+    def process_queue_front(self):
+        if not self.queue:
+            event = SokobanDefeat(self.initial_state)
+            self.mode = 'defeated'
+            core.Application.get().on_event(event)
+            return
+        
+        self.neighbors.clear()
+        self.current_state = self.queue[0]
+        self.queue.remove(0)
+        
+        if is_victory(self.current_state):
+            print("Victory!")
+            event = SokobanVictory(self.initial_state, self.get_path())
+            core.Application.get().on_event(event)
+            self.mode = 'victory'
+            return
+        
+        for direction in get_valid_moves(self.current_state):
+            new_state = try_move(self.current_state, direction)
+            
+            if new_state and new_state not in self.visited:
+                self.neighbors.add(new_state)
+                self.parent_pointers[new_state] = self.current_state
+                
+    
+    def process_neighbors(self):
+        for state in self.neighbors:
+            self.queue.add(state)
+            self.visited.add(state)
+            self.visited_tape.add(state)
+    
+        self.neighbors.clear()
+        
+    
+    def get_path(self):
+        path = []
+        current = self.current_state
+        
+        while current is not None:
+            path.append(current)
+            current = self.parent_pointers[current]
+        
+        return path[::-1]
+    
+    def step(self, dt):
+        self.step_time += dt
+        if self.mode != 'solving' or self.step_time < self.STEP_TIME:
+            return
+        
+        self.step_time = 0.0
+        self.current_step = (self.current_step + 1) % len(self.steps)
+        self.steps[self.current_step]()
+
+        
+from core.EventManager import EventCategory
+    
+class SokobanVictory(core.Event):
+    def __init__(self, original_state: SokobanState, steps: List[SokobanState]):
+        super().__init__("SOKOBAN_VICTORY", EventCategory.Application)
+        self.original_state = original_state
+        self.steps = steps
+    
+    
+class SokobanDefeat(core.Event):
+    def __init__(self, original_state: SokobanState):
+        super().__init__("SOKOBAN_DEFEAT", EventCategory.Application)
+        self.original_state = original_state
 
 class SokobanLayer(core.Layer):
     def __init__(self):
         core.Layer.__init__(self, "SokobanLayer")
-        self.state = None
         self.view = None
         
         self.resource_manager = core.ResourceManager()
@@ -299,23 +498,49 @@ class SokobanLayer(core.Layer):
         self.right_size = 520, 680
         self.right_center = 1000, 360
         
-        # self.solver = None
-        # self.tape = None
+        # 720 + 20 + 260 = 1000
+        self.tapes_locations = [(1000, 113), (1000, 340), (1000, 566)]
+        self.tape_area = 520, 226
+        
+        self.solver = None
+        
     
     def on_attach(self):
-        self.state = make_state(description)
         self.view = SokobanView(25, self.resource_manager)
-        # self.solver = SokobanSolver()
-        # self.tape = Tape()
+        self.solver = SokobanSolver(make_state(description))
+        
+        self.resource_manager.load_image("bg", os.path.join(WORKING_DIR, "assets", "background.png"), convert_alpha=True)
         
     def on_detach(self): 
         self.resource_manager.clear()
         
     def on_update(self, dt):
-        pass
+        if self.solver:
+            self.solver.step(dt)
     
     def on_event(self, event):
-        pass
+        def on_victory(event: SokobanVictory):
+            print("Victory!")
+            print("Steps to victory:")
+            for step in event.steps:
+                print(step)
+            return True
+                
+        def on_defeat(event: SokobanDefeat):
+            print("Defeat!")
+            print("Final state:")
+            print(event.original_state)
+            return True
+        
+        dispatcher = core.EventDispatcher(event)
+        status = dispatcher.dispatch("SOKOBAN_VICTORY", on_victory)
+        
+        if status:
+            core.Application.get().on_event(core.EventManager.WindowCloseEvent())
+    
+        status = dispatcher.dispatch("SOKOBAN_DEFEAT", on_defeat)
+        if status:
+            core.Application.get().on_event(core.EventManager.WindowCloseEvent())
     
     def on_render(self, renderer: core.Renderer):
         def get_top_left(center, size):
@@ -327,16 +552,26 @@ class SokobanLayer(core.Layer):
 
         # Create and clear main screen surface
         screen_surface = renderer.create_surface(*app_config["size"])
-        screen_surface.fill((255, 255, 255))  # White background
+        # draw the background
+        bg_surface = self.resource_manager.get('image', "bg")
+        bg_surface = pygame.transform.smoothscale(bg_surface, app_config["size"])
+        screen_surface.blit(bg_surface, (0, 0))
         renderer.submit_surface(screen_surface)
 
         # Render board
-        board_surface = self.view.render_view(self.state)
+        current_state = self.solver.current_state
+        board_surface = self.view.render_view(current_state)
         scaled_board = rescale_surface_to_fit(board_surface, self.left_size)
 
         # Draw board in left section
         draw_section(self.left_center, self.left_size, scaled_board)
         
+        # Render the tapes
+        tapes = [self.solver.queue, self.solver.neighbors, self.solver.visited_tape]
+        for (x, y), tape in zip(self.tapes_locations, tapes):
+            tape_surface = tape.to_surface()
+            scaled_tape = rescale_surface_to_fit(tape_surface, self.tape_area)
+            draw_section((x, y), self.tape_area, scaled_tape)
 
 class Sokoban(core.Application):
     def __init__(self):
@@ -346,5 +581,7 @@ class Sokoban(core.Application):
         sokoban_layer = SokobanLayer()
         self.layer_stack.push_layer(sokoban_layer)
         
-app = Sokoban()
-core.main(app)
+        
+if __name__ == '__main__':
+    app = Sokoban()
+    core.main(app)
