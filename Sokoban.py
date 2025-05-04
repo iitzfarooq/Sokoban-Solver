@@ -2,6 +2,15 @@ import core
 import os
 import pygame
 from typing import List, Tuple, Set
+from Grid import description
+
+WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
+app_config = {
+    "working_directory": WORKING_DIR,
+    "size": (1280, 720),
+    "title": "Sokoban",
+    "fps": 60,
+}
 
 DIRECTION_VECTOR = {
     "up": (-1, 0),
@@ -16,9 +25,6 @@ MASKS = {
     "boulder": 0x01,
     "wall": 0x02,
 }
-
-WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
-
 
 def generate_indices(shape):
     if not shape:
@@ -247,6 +253,30 @@ class SokobanView:
                 
         return board_surface
 
+def rescale_surface_to_fit(surface: pygame.Surface, shape):
+    """
+    Rescale the board surface to fit within the given shape (width, height),
+    preserving aspect ratio.
+    """
+    if not shape:
+        return surface
+
+    target_width, target_height = shape
+    surface_width, surface_height = surface.get_size()
+
+    # Compute scale factors for width and height
+    scale_x = target_width / surface_width
+    scale_y = target_height / surface_height
+
+    # Preserve aspect ratio — take the smaller scaling factor
+    scale_factor = min(scale_x, scale_y)
+
+    # Compute new size while preserving aspect ratio
+    new_width = int(surface_width * scale_factor)
+    new_height = int(surface_height * scale_factor)
+
+    # Use smooth scaling for better quality
+    return pygame.transform.smoothscale(surface, (new_width, new_height))
 
 class Tape:
     pass
@@ -255,30 +285,26 @@ class Tape:
 class SokobanSolver:
     pass
 
-description = [
-        [["wall"], ["wall"], ["wall"], ["wall"], [], [], []],
-        [["wall"], [], [], ["wall"], ["wall"], ["wall"], ["wall"]],
-        [["wall"], [], ["target"], [], ["target"], [], ["wall"]],
-        [["wall"], [], ["boulder"], ["boulder"], ["wall"], ["player"], ["wall"]],
-        [["wall"], ["wall"], [], [], [], [], ["wall"]],
-        [[], ["wall"], ["wall"], ["wall"], ["wall"], ["wall"], ["wall"]]
-]
-
-
 class SokobanLayer(core.Layer):
     def __init__(self):
-        super().__init__("SokobanLayer")
+        core.Layer.__init__(self, "SokobanLayer")
         self.state = None
         self.view = None
         
         self.resource_manager = core.ResourceManager()
+        
+        self.left_size = 680, 680
+        self.left_center = 360, 360
+        
+        self.right_size = 520, 680
+        self.right_center = 1000, 360
         
         # self.solver = None
         # self.tape = None
     
     def on_attach(self):
         self.state = make_state(description)
-        self.view = SokobanView(50, self.resource_manager)
+        self.view = SokobanView(25, self.resource_manager)
         # self.solver = SokobanSolver()
         # self.tape = Tape()
         
@@ -291,20 +317,30 @@ class SokobanLayer(core.Layer):
     def on_event(self, event):
         pass
     
-    def on_render(self, renderer):
-        board_surface = self.view.render_view(self.state)
-        renderer.submit_surface(board_surface, 0, 0)
+    def on_render(self, renderer: core.Renderer):
+        def get_top_left(center, size):
+            return center[0] - size[0] // 2, center[1] - size[1] // 2
 
+        def draw_section(center, size, surface_to_draw):
+            pos = get_top_left(center, surface_to_draw.get_size())
+            renderer.submit_surface(surface_to_draw, *pos)
+
+        # Create and clear main screen surface
+        screen_surface = renderer.create_surface(*app_config["size"])
+        screen_surface.fill((255, 255, 255))  # White background
+        renderer.submit_surface(screen_surface)
+
+        # Render board
+        board_surface = self.view.render_view(self.state)
+        scaled_board = rescale_surface_to_fit(board_surface, self.left_size)
+
+        # Draw board in left section
+        draw_section(self.left_center, self.left_size, scaled_board)
+        
 
 class Sokoban(core.Application):
     def __init__(self):
-        config = {
-            "working_directory": WORKING_DIR,
-            "size": (800, 600),
-            "title": "Sokoban",
-            "fps": 60,
-        }
-        super().__init__(config)
+        super().__init__(app_config)
         
     def on_start(self):
         sokoban_layer = SokobanLayer()
