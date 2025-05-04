@@ -7,9 +7,16 @@ import core.EventManager as em
 
 
 class Application(ABC):
+    instance = None
+    
     def __init__(self, config: dict):
+        if Application.instance is not None:
+            raise Exception("Application instance already exists.")
+        Application.instance = self
+        
         pygame.init()
 
+        self.config = config
         self.working_directory = config.get("working_directory", ".")
         self.size = config.get("size", (800, 600))
         self.title = config.get("title", "Application")
@@ -25,6 +32,13 @@ class Application(ABC):
         self.renderer = Renderer(self.screen)
 
         self.running = False
+        
+    @classmethod
+    def get(cls):
+        if cls.instance is None:
+            raise Exception("Application instance not created yet.")
+        return cls.instance
+
 
     @abstractmethod
     def on_start(self):
